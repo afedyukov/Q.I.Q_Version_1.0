@@ -1,0 +1,327 @@
+import pygame
+
+pygame.init()
+
+display_size = [1920, 1080]
+display = pygame.display.set_mode(display_size)
+
+clock = pygame.time.Clock()
+FPS = 60
+
+background = pygame.image.load('img/sky.png')
+background = pygame.transform.scale(background, display_size)
+
+
+lava_group = pygame.sprite.Group()
+enemy_group = pygame.sprite.Group()
+coin_group = pygame.sprite.Group()
+tile_group = pygame.sprite.Group()
+
+game = True
+end = False
+
+block_size = 50
+
+high_score = 0
+
+def draw_grid():
+    for i in range(display_size[0] // block_size):
+        pygame.draw.line(display, (0, 0, 0), (i * block_size, 0), (i * block_size, display_size[1]))
+    for i in range(display_size[0] // block_size):
+        pygame.draw.line(display, (0, 0, 0), (0, i * block_size), (display_size[0], i * block_size))
+
+
+def load_map(map):
+    f = open(map, 'r')
+    data = f.read()
+    f.close()
+    data = data.split('\n')
+    game_map = []
+    for row in data:
+        game_map.append(list(row))
+
+    return game_map
+
+
+world_map = load_map('map.txt')
+
+
+
+class Player():
+    def __init__(self, left, bottom):
+        self.images_right = []
+        self.images_left = []
+
+        for i in range(1, 5):
+            img_right = pygame.image.load(f'img/guy{i}.png')
+            k = img_right.get_width() / (block_size - 10)
+            img_right = pygame.transform.scale(img_right,
+                                               (img_right.get_width() // k,
+                                                img_right.get_height() // k))
+            img_left = pygame.transform.flip(img_right, True, False)
+            self.images_right.append(img_right)
+            self.images_left.append(img_left)
+
+        self.ghostImg = pygame.image.load('img/ghost.png')
+        self.index = 0
+        self.image = self.images_right[self.index]
+
+        self.rect = self.image.get_rect()
+        self.rect.left = left
+        self.rect.bottom = bottom
+        self.width = self.image.get_width()
+        self.height= self.image.get_height()
+
+        self.jump = True
+        self.jump_force = -12
+        self.speed_x = 5
+        self.speed_y = gravity
+        self.move_x = 0
+        self.move_y = 0
+        self.direction = 0
+
+        self.score = 0
+
+        self.walk_time = 0
+        self.walk_cooldown = 5
+
+        self.sound_coin = pygame.mixer.Sound('sound/coin.wav')
+        self.sound_game_over = pygame.mixer.Sound('sound/game_over.wav')
+        self.sound_jump = pygame.mixer.Sound('sound/jump.wav')
+
+    def draw(self):
+        display.blit(self.image, self.rect)
+
+    def update(self):
+        global game
+        key = pygame.key.get_pressed()
+        if not game:
+            self.image = self.ghostImg
+            if self.rect.y > 200:
+                self.rect.y -= 5
+
+            if key[pygame.K_SPACE]:
+                global world, lava_group, enemy_group, coin_group
+                lava_group.empty()
+                enemy_group.empty()
+                coin_group.empty()
+                world = World(world_map)
+                game = True
+            return
+
+        self.move_x = 0
+
+        if key[pygame.K_a]:
+            self.move_x = -self.speed_x
+            self.walk_time += 1
+        if key[pygame.K_d]:
+            self.move_x = self.speed_x
+            self.walk_time += 1
+        if key[pygame.K_SPACE] and not self.jump:
+            self.sound_jump.play()
+            self.jump = True
+            self.move_y = self.jump_force
+
+        if self.walk_time == self.walk_cooldown:
+            self.walk_time = 0
+            self.index = (self.index + 1) % len(self.images_right)
+
+        if self.move_x > 0:
+            self.image = self.images_right[self.index]
+            self.direction = 1
+        elif self.move_x < 0:
+            self.image = self.images_left[self.index]
+            self.direction = -1
+        else:
+            self.index = 0
+            if self.direction == -1:
+                self.image = self.images_left[self.index]
+            else:
+                self.image = self.images_right[self.index]
+
+
+
+        for coin in coin_group:
+            if coin.rect.colliderect(player.rect):
+                self.sound_coin.play()
+                self.score += 1
+                global high_score
+                if self.score > high_score:
+                    high_score = self.score
+                coin_group.remove(coin)
+
+
+        for enemy in enemy_group:
+            if enemy.rect.colliderect(self.rect.x, self.rect.y,
+                                     self.width, self.height):
+                if self.move_y > 0 and self.rect.bottom < enemy.rect.center[1]:
+                    enemy_group.remove(enemy)
+                    self.jump = True
+                    self.move_y = -5
+
+        if pygame.sprite.spritecollide(self, enemy_group, False) or \
+           pygame.sprite.spritecollide(self, lava_group, False):
+            self.sound_game_over.play()
+            game = False
+
+
+        for tile in tile_group:
+            if tile.rect.colliderect(self.rect.x + self.move_x, self.rect.y,
+                                     self.width, self.height):
+                self.move_x = 0
+
+            if tile.rect.colliderect(self.rect.x, self.rect.y + self.move_y,
+                                  self.width, self.height):
+                if self.move_y > 0:
+                    self.jump = False
+                    self.rect.y += tile.rect.top - self.rect.bottom
+                else:
+                    self.rect.y += tile.rect.bottom - self.rect.top
+                self.move_y = 0
+
+
+        self.rect.x += self.move_x
+        self.rect.y += self.move_y
+        self.move_y += self.speed_y
+
+
+
+
+
+
+
+
+
+class Lava(pygame.sprite.Sprite):
+    def __init__(self, left, bottom):
+        pygame.sprite.Sprite.__init__(self)
+        img = pygame.image.load('img/lava.png')
+        self.image = pygame.transform.scale(img, (block_size, block_size // 2))
+        self.rect = self.image.get_rect()
+        self.rect.left = left
+        self.rect.bottom = bottom
+
+
+class Enemy(pygame.sprite.Sprite):
+    def __init__(self, left, bottom):
+        pygame.sprite.Sprite.__init__(self)
+        self.image = pygame.image.load('img/blob.png')
+        self.rect = self.image.get_rect()
+        self.rect.left = left
+        self.rect.bottom = bottom
+
+        self.move_x = 0
+        self.speed_x = 1
+        self.direction = 1
+
+    def update(self):
+        self.rect.x += self.speed_x * self.direction
+        self.move_x += self.speed_x
+        if self.move_x == block_size:
+            self.move_x = 0
+            self.direction *= -1
+
+
+
+class Coin(pygame.sprite.Sprite):
+    def __init__(self, x, y):
+        pygame.sprite.Sprite.__init__(self)
+        img = pygame.image.load('img/coin.png')
+
+        self.image = pygame.transform.scale(img, (block_size // 2, block_size // 2))
+        self.rect = self.image.get_rect()
+        self.rect.x = x + (block_size - self.image.get_width()) // 2
+        self.rect.y = y + (block_size - self.image.get_height()) // 2
+
+
+class Tile(pygame.sprite.Sprite):
+    def __init__(self, left, bottom, img):
+        pygame.sprite.Sprite.__init__(self)
+        self.image = img
+        self.rect = self.image.get_rect()
+        self.rect.left = left
+        self.rect.bottom = bottom
+
+
+class World():
+    def __init__(self, world_map):
+        global gravity
+        gravity = 1
+        self.font = pygame.font.Font('04B_19.TTF', 32)
+        self.restart_font = pygame.font.Font('04B_19.TTF', 64)
+        grass_img = pygame.image.load('img/grass.png')
+        pygame.mixer.music.load('sound/music.wav')
+        pygame.mixer.music.play(-1)
+        grass_img = pygame.transform.scale(grass_img, (block_size, block_size))
+
+        for i in range(len(world_map)):
+            for j in range(len(world_map[i])):
+                tile = world_map[i][j]
+
+                if tile == '1':
+                    tile = Tile(j * block_size, (i + 1) * block_size, grass_img)
+                    tile_group.add(tile)
+
+                elif tile == 'P':
+                    global player
+                    player = Player(j * block_size, (i + 1) * block_size)
+
+                elif tile == 'L':
+                    lava = Lava(j * block_size, (i + 1) * block_size)
+                    lava_group.add(lava)
+
+                elif tile == 'E':
+                    enemy = Enemy(j * block_size, (i + 1) * block_size)
+                    enemy_group.add(enemy)
+
+                elif tile == 'C':
+                    coin = Coin(j * block_size, i * block_size)
+                    coin_group.add(coin)
+
+    def draw(self):
+        lava_group.draw(display)
+        enemy_group.draw(display)
+        coin_group.draw(display)
+        tile_group.draw(display)
+        player.draw()
+        self.score_display()
+
+
+
+
+    def score_display(self):
+        text_score = self.font.render("Score: " + str(player.score), True, (255, 255, 255))
+        display.blit(text_score, (10, 10))
+
+        if not game:
+            global high_score,world_map
+            restart_surface = self.restart_font.render("Press space to restart", True, (123, 123, 123))
+            restart_rect = restart_surface.get_rect(center=(display_size[0] / 2, display_size[1] / 2))
+            display.blit(restart_surface, restart_rect)
+
+            high_score_surface = self.restart_font.render("High Score: " + str(high_score), True, (100, 100, 100))
+            high_score_rect = high_score_surface.get_rect(center=(display_size[0] / 2, display_size[1] / 2 - 100))
+            display.blit(high_score_surface, high_score_rect)
+
+            if str(player.score) == '4':
+                world_map = load_map('map_1.txt')
+
+world = World(world_map)
+
+
+while not end:
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            end = True
+
+    display.blit(background, (0, 0))
+
+    world.draw()
+
+    player.update()
+    enemy_group.update()
+
+    #draw_grid()
+
+    pygame.display.update()
+    clock.tick(FPS)
